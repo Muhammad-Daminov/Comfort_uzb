@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncpg
 
+from app import notifications
 from app.domains.commerce.orders import repository as orders_repository
 from app.domains.commerce.orders.state_machine import assert_transition_allowed
 from app.domains.payments import repository as payments_repository
@@ -159,7 +160,31 @@ async def review_payment(
                 payment["order_id"],
                 payment["amount"],
             )
-        elif order["status"] == "UNDER_REVIEW":
+            notif_type, title, body = notifications.payment_approved(order_number=order["order_number"])
+            await notifications.create_notification(
+                conn,
+                user_id=order["user_id"],
+                type=notif_type,
+                title=title,
+                body=body,
+                entity_type="order",
+                entity_id=order["id"],
+            )
+        else:
+            notif_type, title, body = notifications.payment_rejected(
+                order_number=order["order_number"], reason=rejection_reason
+            )
+            await notifications.create_notification(
+                conn,
+                user_id=order["user_id"],
+                type=notif_type,
+                title=title,
+                body=body,
+                entity_type="order",
+                entity_id=order["id"],
+            )
+
+        if not approve and order["status"] == "UNDER_REVIEW":
             # §8.1: UNDER_REVIEW -> REJECTED is the admin rejecting the
             # receipt. Nothing ever performed this transition before: the
             # payment flipped to REJECTED but the order stayed UNDER_REVIEW

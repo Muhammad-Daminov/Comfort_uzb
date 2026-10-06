@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import asyncpg
 
+from app import notifications
 from app.domains.catalog import repository as catalog_repository
 from app.domains.commerce.cart import repository as cart_repository
 from app.domains.commerce.orders import repository as orders_repository
@@ -212,7 +213,27 @@ async def cancel_order(
             ip=ip,
         )
 
-        return await orders_repository.get_order(conn, order_id=order_id)
+        final_order = await orders_repository.get_order(conn, order_id=order_id)
+
+        if actor_role != "USER":
+            # The user already knows when they cancel their own order
+            # themselves — only an admin/owner-initiated cancellation is
+            # news to them. Same transaction as the transition above: a
+            # rollback here rolls this notification back too.
+            notif_type, title, body = notifications.order_cancelled(
+                order_number=final_order["order_number"], reason=reason
+            )
+            await notifications.create_notification(
+                conn,
+                user_id=final_order["user_id"],
+                type=notif_type,
+                title=title,
+                body=body,
+                entity_type="order",
+                entity_id=order_id,
+            )
+
+        return final_order
 
 
 async def confirm_order(
@@ -305,7 +326,20 @@ async def confirm_order(
             ip=ip,
         )
 
-        return await orders_repository.get_order(conn, order_id=order_id)
+        final_order = await orders_repository.get_order(conn, order_id=order_id)
+
+        notif_type, title, body = notifications.order_confirmed(order_number=final_order["order_number"])
+        await notifications.create_notification(
+            conn,
+            user_id=final_order["user_id"],
+            type=notif_type,
+            title=title,
+            body=body,
+            entity_type="order",
+            entity_id=order_id,
+        )
+
+        return final_order
 
 
 class ConcurrentConfirmation(Exception):

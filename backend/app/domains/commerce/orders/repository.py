@@ -92,8 +92,12 @@ async def get_order_for_update(conn: asyncpg.Connection, *, order_id: int) -> as
     """§8.2's `SELECT ... FOR UPDATE` row lock — must be called inside an
     open transaction on `conn`. Includes `paid_amount` for ADR-017's
     cancel_order guard (an order with an approved payment cannot go through
-    the direct cancel path) without a second round-trip."""
-    return await conn.fetchrow("SELECT id, status, paid_amount FROM orders WHERE id = $1 FOR UPDATE", order_id)
+    the direct cancel path) without a second round-trip. Includes `user_id`/
+    `order_number` so callers that notify the order's owner on this same
+    transition (app/notifications.py) don't need a second lookup."""
+    return await conn.fetchrow(
+        "SELECT id, user_id, order_number, status, paid_amount FROM orders WHERE id = $1 FOR UPDATE", order_id
+    )
 
 
 async def get_order_items(conn: asyncpg.Connection, *, order_id: int) -> list[asyncpg.Record]:
