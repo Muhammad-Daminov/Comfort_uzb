@@ -1,0 +1,23 @@
+# Secrets — real values live here and must never be committed.
+# `.env.example` IS committed: it is documentation, not configuration
+# (the application reads os.environ only, never a .env file).
+backend/.env.local
+backend/.env
+.env.local
+.env
+
+# Dependencies
+.venv/
+node_modules/
+
+# Build output
+miniapp/dist/
+miniapp/tsconfig.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local runtime state written by scripts/dev.sh
+.dev-state/

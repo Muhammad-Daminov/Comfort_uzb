@@ -1,0 +1,37 @@
+[Unit]
+Description=COMFORT UZB API (FastAPI + Telegram bot webhook, one process — ADR-1)
+# One unit, not two ("comfort-api" + "comfort-bot" as the Master TZ's §17.2
+# napkin sketch names) — the bot's webhook route and notification poller
+# run inside this same FastAPI process (bot/main.py's own docstring: "the
+# same FastAPI app the Mini App API uses"). Running a second "comfort-bot"
+# unit against the same codebase would start a second, unrelated process
+# that owns none of the actual bot wiring — app/main.py's lifespan is
+# where Bot/Dispatcher are constructed, once, per app instance.
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=comfort
+Group=comfort
+WorkingDirectory=/opt/comfort/backend
+EnvironmentFile=/etc/comfort/backend.env
+ExecStart=/opt/comfort/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+Restart=on-failure
+RestartSec=5
+
+# Never root (§12.5) — the `comfort` user/group must already exist and own
+# WorkingDirectory, UPLOADS_ROOT, and this unit's own EnvironmentFile.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/comfort/uploads
+PrivateTmp=true
+
+# journald captures stdout/stderr — app/observability.py's structured JSON
+# log lines land here, queryable with `journalctl -u comfort-api`.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=comfort-api
+
+[Install]
+WantedBy=multi-user.target

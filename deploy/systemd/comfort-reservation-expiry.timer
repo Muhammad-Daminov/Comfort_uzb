@@ -1,0 +1,14 @@
+[Unit]
+Description=Run comfort-reservation-expiry every 5 minutes (§15)
+
+[Timer]
+OnCalendar=*:0/5
+# Catch up after downtime: reservations that expired while the box was off
+# still hold stock, so the release must not simply be skipped.
+Persistent=true
+# Keep the 5-minute tick from landing exactly on other cron-ish work.
+RandomizedDelaySec=30
+Unit=comfort-reservation-expiry.service
+
+[Install]
+WantedBy=timers.target

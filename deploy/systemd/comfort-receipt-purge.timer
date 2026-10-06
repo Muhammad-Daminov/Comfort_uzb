@@ -1,0 +1,13 @@
+[Unit]
+Description=Run comfort-receipt-purge daily at 03:30 (ADR-9 retention)
+
+[Timer]
+# After comfort-backup's 03:00 window, so a receipt file is captured in
+# that night's backup before it is purged from disk.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=comfort-receipt-purge.service
+
+[Install]
+WantedBy=timers.target

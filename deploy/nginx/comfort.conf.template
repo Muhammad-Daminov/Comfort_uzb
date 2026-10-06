@@ -1,0 +1,163 @@
+# COMFORT UZB — Nginx site config (§16/§17.2, ADR-13).
+#
+# This is a TEMPLATE, not a ready-to-drop-in config: ${DOMAIN} and
+# ${SIGNING_SECRET} must be substituted before use (Nginx cannot read OS
+# environment variables inside directives). Render it with:
+#
+#   export DOMAIN=comfort.example.uz
+#   export SIGNING_SECRET="$(grep ^SIGNING_SECRET /etc/comfort/backend.env | cut -d= -f2-)"
+#   envsubst '${DOMAIN} ${SIGNING_SECRET}' < comfort.conf.template > /etc/nginx/sites-available/comfort.conf
+#
+# SIGNING_SECRET here MUST be byte-for-byte identical to the app's own
+# SIGNING_SECRET env var (app/security/signing.py) — ADR-13's whole
+# contract depends on both sides hashing the exact same string. See
+# docs/09_DEPLOYMENT.md "Signed URLs" for the full procedure and its
+# current verification status (this config was written and syntax-checked
+# locally; it has not been exercised against a live Nginx + TLS + real
+# domain, since none exists for this project yet — see the Phase 09
+# report's "Deferred items").
+#
+# Requires nginx-extras (or an nginx build with --with-http_secure_link_module)
+# for the `secure_link`/`secure_link_md5` directives ADR-13 depends on —
+# verify with `nginx -V 2>&1 | grep secure_link` before relying on this.
+
+# §12.4 — app-level limits from the Master TZ's own table, enforced here
+# rather than in application code (no in-app rate-limiting framework
+# exists — see docs/08_SECURITY.md "Rate limiting"). Zone sizes (10m) hold
+# roughly 160k tracked IPs each, generous for a single-store deployment.
+limit_req_zone $binary_remote_addr zone=comfort_general:10m rate=1r/s;      # ~60/min
+limit_req_zone $binary_remote_addr zone=comfort_orders:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=comfort_payments:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=comfort_uploads:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=comfort_search:10m rate=30r/m;
+limit_req_zone $binary_remote_addr zone=comfort_admin_actions:10m rate=60r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    # Certbot's HTTP-01 challenge needs plain HTTP to keep working even
+    # after this block otherwise only exists to redirect.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    # `listen ... http2` (not the newer `http2 on;`): the latter needs nginx
+    # >= 1.25.1 and Ubuntu 22.04/24.04 ship 1.18/1.24, where `nginx -t`
+    # fails with "unknown directive". This form works on every current
+    # release (deprecated-with-warning on >= 1.25.1, still functional).
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN};
+
+    # Certbot manages these two paths (certonly --webroot or --nginx).
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # §12.5
+    server_tokens off;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
+    # Telegram Mini App requires HTTPS end-to-end; a self-signed cert will
+    # not work inside the Telegram client (§16.2's own note).
+
+    client_max_body_size 8m;  # app/security/uploads.py caps raw uploads at 5MB — headroom for multipart overhead
+
+    # --- Mini App static build (miniapp/dist/) --------------------------------
+    root /var/comfort/web;
+    index index.html;
+
+    location / {
+        limit_req zone=comfort_general burst=20 nodelay;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # --- Signed file access (ADR-13) — Nginx verifies, never Python -----------
+    location /files/ {
+        secure_link         $arg_s,$arg_e;
+        secure_link_md5     "$secure_link_expires$uri ${SIGNING_SECRET}";
+        if ($secure_link = "")  { return 403; }
+        if ($secure_link = "0") { return 410; }
+        alias /var/comfort/uploads/;
+        add_header Cache-Control "private, max-age=3600";
+        # `add_header` in a location REPLACES the server-level set — repeat
+        # HSTS here or /files/ responses would go out without it.
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+        # $remote_addr is deliberately NOT part of the signature — mobile
+        # IPs roam mid-session and would otherwise break a still-valid link.
+    }
+
+    # --- API reverse proxy ------------------------------------------------------
+    location /health/ {
+        # No rate limit — this is what an external uptime monitor and
+        # systemd/Nginx health checks hit, potentially frequently.
+        proxy_pass http://127.0.0.1:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /telegram/webhook {
+        # Telegram's own servers call this — not a browser, no per-IP
+        # limit zone makes sense here (Telegram's IP ranges are shared
+        # infrastructure, not per-user).
+        proxy_pass http://127.0.0.1:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # `^~` on the prefix blocks: a plain prefix location loses to ANY
+    # matching regex location (the general `~ ^/(auth|catalog|...)` block
+    # at the bottom), so before this the /orders, /payments and
+    # /catalog/search zones were never applied — every request fell into
+    # the general 60/min zone. `^~` stops the regex search once the prefix
+    # matches. The two upload paths keep their own (regex) block below and
+    # are listed first because nginx evaluates regexes in file order.
+    location ~ ^/admin/products/[0-9]+/images {
+        # Upload-bearing endpoint (product images). /cart/items used to be
+        # listed here too — it is NOT an upload (JSON quantity changes) and
+        # the 10/min zone made the cart stepper 503 after a few taps.
+        limit_req zone=comfort_uploads burst=5 nodelay;
+        include /etc/nginx/comfort_proxy.conf;
+    }
+
+    location ^~ /orders {
+        limit_req zone=comfort_orders burst=5 nodelay;
+        include /etc/nginx/comfort_proxy.conf;
+    }
+
+    location ^~ /payments {
+        # Nested: `^~` skips top-level regexes, so the receipt-upload path
+        # gets its own zone here instead.
+        location ~ ^/payments/[0-9]+/receipt$ {
+            limit_req zone=comfort_uploads burst=5 nodelay;
+            include /etc/nginx/comfort_proxy.conf;
+        }
+        limit_req zone=comfort_payments burst=5 nodelay;
+        include /etc/nginx/comfort_proxy.conf;
+    }
+
+    location ^~ /catalog/search {
+        limit_req zone=comfort_search burst=10 nodelay;
+        include /etc/nginx/comfort_proxy.conf;
+    }
+
+    location ~ ^/admin/(orders|payments)/[0-9]+/(confirm|cancel|review) {
+        limit_req zone=comfort_admin_actions burst=20 nodelay;
+        include /etc/nginx/comfort_proxy.conf;
+    }
+
+    location ~ ^/(auth|catalog|vehicles|cart|orders|payments|owner|admin) {
+        limit_req zone=comfort_general burst=20 nodelay;
+        include /etc/nginx/comfort_proxy.conf;
+    }
+}

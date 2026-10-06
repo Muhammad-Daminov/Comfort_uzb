@@ -1,0 +1,31 @@
+[Unit]
+Description=COMFORT UZB — release expired stock reservations (ADR-6, §15)
+# Deliberately a separate short-lived process, NOT part of comfort-api:
+# a periodic batch job shares nothing with request handling and must never
+# compete with it for the API's event loop or connection pool. (The bot
+# *is* in comfort-api, per ADR-1, because it shares the Service layer.)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=comfort
+Group=comfort
+WorkingDirectory=/opt/comfort/backend
+EnvironmentFile=/etc/comfort/backend.env
+ExecStart=/opt/comfort/backend/.venv/bin/python -m app.workers.reservation_expiry
+
+# Connects as comfort_app like the API does — this worker only SELECTs and
+# UPDATEs (guarded release + status transition + audit insert); it needs no
+# DELETE and no DDL, so it must NOT be given comfort_migrate's DSN.
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+
+# Non-zero exit marks the unit failed, so `systemctl --failed` and
+# `journalctl -u comfort-reservation-expiry` surface it. Overlapping runs
+# are skipped via a Postgres advisory lock (app/workers/_entrypoint.py),
+# which also covers a manual run racing the timer.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=comfort-reservation-expiry

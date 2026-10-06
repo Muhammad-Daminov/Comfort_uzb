@@ -1,0 +1,12 @@
+[Unit]
+Description=COMFORT UZB — disk-usage check, alerts OWNER via Telegram if >=80% (§17.6)
+
+[Service]
+Type=oneshot
+User=comfort
+Group=comfort
+EnvironmentFile=/etc/comfort/backend.env
+ExecStart=/opt/comfort/deploy/scripts/health.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=comfort-health

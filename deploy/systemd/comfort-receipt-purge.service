@@ -1,0 +1,23 @@
+[Unit]
+Description=COMFORT UZB — purge payment receipt files past retention (ADR-9, §11)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+User=comfort
+Group=comfort
+WorkingDirectory=/opt/comfort/backend
+EnvironmentFile=/etc/comfort/backend.env
+ExecStart=/opt/comfort/backend/.venv/bin/python -m app.workers.receipt_purge
+
+NoNewPrivileges=true
+ProtectSystem=strict
+# This worker unlinks files under UPLOADS_ROOT — the one path it must be
+# able to write. ADR-9: only the file is purged, never the DB row.
+ReadWritePaths=/var/comfort/uploads
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=comfort-receipt-purge
