@@ -47,36 +47,47 @@ export function render(container: HTMLElement): void {
       return;
     }
     debounceHandle = setTimeout(() => {
-      void searchProducts(query).then((response) => {
-        resultsSection.replaceChildren();
-        if (response.items.length === 0) {
-          resultsSection.appendChild(emptyState("Hech narsa topilmadi.", undefined, "search"));
-          return;
-        }
-        for (const product of response.items) {
-          const row = document.createElement("button");
-          row.type = "button";
-          row.className = "card card-tap mb-8";
-          row.style.width = "100%";
-          row.style.textAlign = "left";
-          row.style.display = "flex";
-          row.style.justifyContent = "space-between";
-          row.style.alignItems = "center";
-          const name = document.createElement("span");
-          name.className = "list-title";
-          name.textContent = product.name;
-          row.appendChild(name);
-          row.appendChild(icon("chevron-right", 16));
-          row.addEventListener("click", () => void showVariants(product.id));
-          resultsSection.appendChild(row);
-        }
-      });
+      searchProducts(query)
+        .then((response) => {
+          resultsSection.replaceChildren();
+          if (response.items.length === 0) {
+            resultsSection.appendChild(emptyState("Hech narsa topilmadi.", undefined, "search"));
+            return;
+          }
+          for (const product of response.items) {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "card card-tap mb-8";
+            row.style.width = "100%";
+            row.style.textAlign = "left";
+            row.style.display = "flex";
+            row.style.justifyContent = "space-between";
+            row.style.alignItems = "center";
+            const name = document.createElement("span");
+            name.className = "list-title";
+            name.textContent = product.name;
+            row.appendChild(name);
+            row.appendChild(icon("chevron-right", 16));
+            row.addEventListener("click", () => void showVariants(product.id));
+            resultsSection.appendChild(row);
+          }
+        })
+        .catch((error: unknown) => {
+          resultsSection.replaceChildren();
+          resultsSection.appendChild(errorState(error));
+        });
     }, 300);
   });
 
   async function showVariants(productId: number): Promise<void> {
     resultsSection.replaceChildren();
-    const detail = await getProduct(productId);
+    let detail;
+    try {
+      detail = await getProduct(productId);
+    } catch (error) {
+      resultsSection.appendChild(errorState(error, () => void showVariants(productId)));
+      return;
+    }
     for (const variant of detail.variants) {
       const row = document.createElement("div");
       row.className = "card mb-12";

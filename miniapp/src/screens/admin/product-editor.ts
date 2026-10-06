@@ -170,6 +170,8 @@ function renderEditor(
   current.textContent = detail.product.status;
   statusRow.appendChild(current);
 
+  const statusTypeMessage = document.createElement("div");
+
   for (const status of ["DRAFT", "ACTIVE", "ARCHIVED"]) {
     if (status === detail.product.status) continue;
     const button = document.createElement("button");
@@ -177,7 +179,11 @@ function renderEditor(
     button.className = "chip";
     button.textContent = `→ ${status}`;
     button.addEventListener("click", () => {
-      void adminApi.adminSetProductStatus(productId, status).then(reload);
+      button.disabled = true;
+      adminApi.adminSetProductStatus(productId, status).then(reload).catch((error: unknown) => {
+        button.disabled = false;
+        statusTypeMessage.appendChild(errorState(error));
+      });
     });
     statusRow.appendChild(button);
   }
@@ -199,11 +205,16 @@ function renderEditor(
     chip.textContent = label;
     chip.setAttribute("aria-pressed", String(detail.product.product_type === value));
     chip.addEventListener("click", () => {
-      void adminApi.adminUpdateProduct(productId, { product_type: value }).then(reload);
+      chip.disabled = true;
+      adminApi.adminUpdateProduct(productId, { product_type: value }).then(reload).catch((error: unknown) => {
+        chip.disabled = false;
+        statusTypeMessage.appendChild(errorState(error));
+      });
     });
     typeRow.appendChild(chip);
   }
   container.appendChild(typeRow);
+  container.appendChild(statusTypeMessage);
 
   renderVariantsSection(container, detail.variants, productId, reload);
   renderImagesSection(container, detail.images, productId, reload);
@@ -375,12 +386,14 @@ function renderImagesSection(
     // §P2-3: no drag-and-drop dependency — up/down swap against the
     // product's current image order (`typed` is already sorted by
     // sort_order, ADR-13/repository.get_images_for_product).
-    function moveImage(index: number, direction: -1 | 1): void {
+    const imagesMessage = document.createElement("div");
+
+    function moveImage(index: number, direction: -1 | 1): Promise<void> {
       const target = index + direction;
-      if (target < 0 || target >= typed.length) return;
+      if (target < 0 || target >= typed.length) return Promise.resolve();
       const reordered = typed.map((i) => i.id);
       [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
-      void adminApi.adminReorderImages(productId, reordered).then(reload);
+      return adminApi.adminReorderImages(productId, reordered).then(reload);
     }
 
     typed.forEach((image, index) => {
@@ -410,7 +423,10 @@ function renderImagesSection(
         upButton.appendChild(icon("arrow-up", 16));
         upButton.addEventListener("click", () => {
           upButton.disabled = true;
-          moveImage(index, -1);
+          moveImage(index, -1).catch((error: unknown) => {
+            upButton.disabled = false;
+            imagesMessage.appendChild(errorState(error));
+          });
         });
         actions.appendChild(upButton);
 
@@ -421,7 +437,10 @@ function renderImagesSection(
         downButton.appendChild(icon("arrow-down", 16));
         downButton.addEventListener("click", () => {
           downButton.disabled = true;
-          moveImage(index, 1);
+          moveImage(index, 1).catch((error: unknown) => {
+            downButton.disabled = false;
+            imagesMessage.appendChild(errorState(error));
+          });
         });
         actions.appendChild(downButton);
       }
@@ -433,7 +452,10 @@ function renderImagesSection(
         primaryButton.textContent = "Asosiy";
         primaryButton.addEventListener("click", () => {
           primaryButton.disabled = true;
-          void adminApi.adminSetPrimaryImage(productId, image.id).then(reload);
+          adminApi.adminSetPrimaryImage(productId, image.id).then(reload).catch((error: unknown) => {
+            primaryButton.disabled = false;
+            imagesMessage.appendChild(errorState(error));
+          });
         });
         actions.appendChild(primaryButton);
       }
@@ -450,7 +472,10 @@ function renderImagesSection(
       removeButton.textContent = "O'chirish";
       removeButton.addEventListener("click", () => {
         removeButton.disabled = true;
-        void adminApi.adminRemoveImage(productId, image.id).then(reload);
+        adminApi.adminRemoveImage(productId, image.id).then(reload).catch((error: unknown) => {
+          removeButton.disabled = false;
+          imagesMessage.appendChild(errorState(error));
+        });
       });
       actions.appendChild(removeButton);
 
@@ -531,6 +556,7 @@ function renderImagesSection(
       grid.appendChild(cell);
     });
     container.appendChild(grid);
+    container.appendChild(imagesMessage);
   }
 
   const uploadCard = document.createElement("div");
@@ -572,7 +598,13 @@ function renderCompatibilitySection(container: HTMLElement, productId: number): 
 
   async function loadList(): Promise<void> {
     listSection.innerHTML = "";
-    const { items } = await adminApi.adminListCompatibilities(productId);
+    let items;
+    try {
+      ({ items } = await adminApi.adminListCompatibilities(productId));
+    } catch (error) {
+      listSection.appendChild(errorState(error, () => void loadList()));
+      return;
+    }
     if (items.length === 0) {
       listSection.appendChild(hint("Hali mos avtomobil belgilanmagan."));
       return;
@@ -595,7 +627,11 @@ function renderCompatibilitySection(container: HTMLElement, productId: number): 
       removeButton.className = "btn btn-dang btn-sm";
       removeButton.textContent = "O'chirish";
       removeButton.addEventListener("click", () => {
-        void adminApi.adminRemoveCompatibility(productId, item.id).then(loadList);
+        removeButton.disabled = true;
+        adminApi.adminRemoveCompatibility(productId, item.id).then(loadList).catch((error: unknown) => {
+          removeButton.disabled = false;
+          listSection.appendChild(errorState(error));
+        });
       });
       row.appendChild(removeButton);
 
