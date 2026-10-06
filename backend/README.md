@@ -3,7 +3,7 @@
 Full rationale and decision log: [`../docs/03_DB_SCHEMA_PLAN.md`](../docs/03_DB_SCHEMA_PLAN.md) (database), [`../docs/04_API_SPEC.md`](../docs/04_API_SPEC.md) (API), [`../docs/05_BOT_SPEC.md`](../docs/05_BOT_SPEC.md) (bot), [`../docs/07_ADMIN_PANEL_SPEC.md`](../docs/07_ADMIN_PANEL_SPEC.md) (admin + owner screens, share the `miniapp/` frontend with USER screens), [`../docs/08_SECURITY.md`](../docs/08_SECURITY.md) (full security posture, per-claim verified-by labeling), [`../docs/09_DEPLOYMENT.md`](../docs/09_DEPLOYMENT.md) (deployment architecture/procedure — no real VPS exists yet, see that doc's own caveats), [`../docs/10_TESTING.md`](../docs/10_TESTING.md) (full test architecture), [`../docs/tasks/Phase-08-Security.md`](../docs/tasks/Phase-08-Security.md) (hardening pass + Phase 08-FINAL completion pass). This file is just the "how do I run it" quick start.
 
 ```
-alembic/                              16 migrations — the schema, in dependency order
+alembic/                              22 migrations — the schema, in dependency order
 db/provision_roles.sql                comfort_app / comfort_migrate / comfort_backup DDL (run once, by a superuser)
 app/                                   FastAPI application — Router/Service/Repository per domain (ADR-015: raw asyncpg)
   main.py                             app + router mounting + connection-pool lifespan + bot wiring (Phase 09) + observability/CORS
@@ -19,8 +19,8 @@ bot/                                   aiogram bot (Phase 04) — thin delivery 
   handlers/start.py                   /start, phone capture, blocked-user re-activation (ADR-12)
   notifications/poller.py             outbox poll loop (ADR-016 — resolves OPEN-6)
   locales/uz.py                       Uzbek message copy
-tests/unit/                           71 pytest tests, no DB — pure functions, mocked bot/DB handler logic, .env.example secret guard, systemd worker-scheduling assertions
-tests/integration/                    168 pytest tests, live PostgreSQL 16, exercised as comfort_app (includes the consolidated security suite, performance smoke test, /health tests, and comfort-receipt-purge worker tests)
+tests/unit/                           250 pytest tests, no DB — pure functions, mocked bot/DB handler logic, .env.example secret guard, systemd worker-scheduling assertions
+tests/integration/                    327 pytest tests, live PostgreSQL 16, exercised as comfort_app (includes the consolidated security suite, performance smoke test, /health tests, notification-producer regression coverage, and comfort-receipt-purge worker tests)
 tests/db/test_schema.py               34 pytest tests, run against a real PostgreSQL 16 instance (0 skipped when TEST_DATABASE_URL_AS_APP/_AS_BACKUP are set)
 tests/db/test_migration_role_e2e.py   genuinely runs the bootstrap AS comfort_migrate against a fresh disposable DB
 tests/db/test_provision_roles_quoting.py  3 tests pinning provision_roles.sql's password quoting (the documented bootstrap must stay executable verbatim)
@@ -109,14 +109,14 @@ If `BOT_TOKEN` doesn't correspond to a real bot (e.g. local dev without a live T
 See [`../docs/10_TESTING.md`](../docs/10_TESTING.md) for the full test architecture (what each suite proves, environment requirements, the §12.6 security-case-to-test mapping). Quick commands:
 
 ```bash
-python3 -m pytest tests/unit -v          # 59 tests, no DB, pure functions + mocked bot handler/poller logic
+python3 -m pytest tests/unit -v          # 250 tests, no DB, pure functions + mocked bot handler/poller logic
 
 # Live-Postgres integration tests — connect as comfort_app (the real
 # production role), plus SUPERUSER_DATABASE_URL for test-data cleanup only
 # (comfort_app has no DELETE/TRUNCATE grant by design, §12.2).
 export TEST_DATABASE_URL="postgresql://comfort_app:<pw>@/<db>?host=<socket_dir>&port=<port>"
 export SUPERUSER_DATABASE_URL="postgresql://<a-superuser>@/<db>?host=<socket_dir>&port=<port>"
-python3 -m pytest tests/integration -v   # 168 tests: checkout re-validation, parallel-confirm,
+python3 -m pytest tests/integration -v   # 327 tests: checkout re-validation, parallel-confirm,
                                           # parallel-last-unit-purchase, reservation expiry, audit
                                           # transaction participation, payment one-way approval,
                                           # bot identity flows, notification delivery (ADR-016),
